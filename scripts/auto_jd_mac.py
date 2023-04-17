@@ -1,36 +1,37 @@
 """
-在windows上跑的版本
+在mac上跑的版本
 """
-
+import click
 import pandas as pd
 from loguru import logger
 import time
 from selenium import webdriver
-from selenium.webdriver.common.action_chains import ActionChains
-from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.common.by import By
 from selenium.common.exceptions import NoSuchElementException
-import pyautogui
+
+time_config = {
+    'mate x3': {'Date': None, 'Time': '10:08'}
+    # 'mate x3': {'Date': None, 'Time': '16:50'} # for debug
+}
 
 
 class JD:
-    def __init__(self):
-        browser = webdriver.Chrome('./chromedriver_win32/chromedriver.exe')
+    def __init__(self, start_time: pd.Timestamp = None):
+        browser = webdriver.Chrome('./chromedriver_mac_arm64/chromedriver')
         browser.maximize_window()
         self.browser = browser
-
-    def _get_button_by_class(self, class_):
-        return self.browser.find_element(By.CLASS_NAME, class_)
-
-    def _get_button_by_name(self, button_name):
-        return self.browser.find_element(By.LINK_TEXT, button_name)
+        if start_time is None:
+            start_time = pd.Timestamp.now()
+        self.start_time = start_time
 
     def _get_button(self, button_name):
         try:
             if button_name in ['全选']:
-                return self._get_button_by_class('jdcheckbox')
+                return self.browser.find_element(By.CLASS_NAME, 'jdcheckbox')
+            if button_name in ['提交订单']:
+                return self.browser.find_element(By.ID, 'order-submit')
             else:
-                return self._get_button_by_name(button_name)
+                return self.browser.find_element(By.LINK_TEXT, button_name)
         except NoSuchElementException:
             return
 
@@ -55,19 +56,40 @@ class JD:
         self.browser.get('https://cart.jd.com/')
 
 
-if __name__ == '__main__':
-    jd = JD()
+def get_start_time(stuff) -> pd.Timestamp:
+    config = time_config.get(stuff)
+    assert config is not None, stuff
+    date, time = config['Date'], config['Time']
+    if date is None:
+        date = pd.Timestamp.now().strftime('%F')
+    t = pd.to_datetime(f'{date} {time}:00')
+    if t < pd.Timestamp.now():
+        # 今天已经过了，抢明天的
+        t += pd.Timedelta(days=1)
+    logger.info(f'{stuff}抢购时间：{t}')
+    return t
+
+
+@click.command()
+@click.option('--stuff', default='mate x3')
+def run(stuff):
+    start_time = get_start_time(stuff)
+    jd = JD(start_time)
     # 进入京东购物车
     jd.go_to_cart()
     # 这里会跳出浏览器，请扫码登录。必须人工操作。
     # 确保是扫码登录界面，不是输入账户密码
     jd.get_button('扫码登录').click()
-    logger.info('请扫码')
+    logger.info('等待扫码登录...')
     while jd.browser.title != '京东商城 - 购物车':
         logger.info(jd.browser.title)
         time.sleep(1)
     # 等待登录加载
     logger.info('登录成功！')
+    ready_time = start_time - pd.Timedelta(minutes=1)
+    while pd.Timestamp.now() < ready_time - pd.Timedelta(minutes=1):  # 提前1分钟进入准备
+        logger.info('还未到准备时间，睡眠1分钟')
+        time.sleep(60)
     select_button = jd.get_button('全选')
     # 找到全选按钮，点击
     while not select_button.is_selected():
@@ -75,7 +97,12 @@ if __name__ == '__main__':
         # 尝试点击全选按钮
         select_button.click()
     jd.get_button('去结算').click()
-    # TODO 提交订单并不能正确点击，get不到
+    logger.info('成功提交结算')
     jd.get_button('提交订单').click()
+    logger.info('成功提交订单')
     # 结束后会自动关闭浏览器，这里还没研究如何取消自动
     time.sleep(100)
+
+
+if __name__ == '__main__':
+    run()
