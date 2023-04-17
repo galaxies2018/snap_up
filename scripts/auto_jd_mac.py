@@ -1,5 +1,9 @@
 """
 在mac上跑的版本
+需要自行根据本机chrome版本下载chromedriver，放到项目目录下。
+下载地址：https://chromedriver.chromium.org/downloads
+
+在项目根目录下执行。
 """
 import click
 import pandas as pd
